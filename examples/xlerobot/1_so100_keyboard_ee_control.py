@@ -388,11 +388,11 @@ def main():
         from lerobot.teleoperators.keyboard import KeyboardTeleop, KeyboardTeleopConfig
         
         # Get port
-        port = input("Please enter the USB port for SO100 robot (e.g., /dev/ttyACM0): ").strip()
+        port = input("Please enter the USB port for SO100 robot (e.g., COM5): ").strip()
         
         # If directly press Enter, use default port
         if not port:
-            port = "/dev/ttyACM0"
+            port = "COM5"
             print(f"Using default port: {port}")
         else:
             print(f"Connecting to port: {port}")

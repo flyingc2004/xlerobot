@@ -3,7 +3,7 @@
 Dual-arm keyboard control for SO100/SO101 robots
 Fixed action format conversion issues
 Uses P control, keyboard only changes target joint angles
-Supports simultaneous control of two robot arms: /dev/ttyACM0 and /dev/ttyACM1
+Supports simultaneous control of two robot arms: COM5 and COM6
 Keyboard mapping: First arm (7y8u9i0o-p=[), Second arm (hbjnkml,;.'/)
 """
 
@@ -459,8 +459,8 @@ def main():
         from lerobot.teleoperators.keyboard import KeyboardTeleop, KeyboardTeleopConfig
         
         # Configure dual-arm robots
-        arm1_port = "/dev/ttyACM0"
-        arm2_port = "/dev/ttyACM1"
+        arm1_port = "COM5"
+        arm2_port = "COM6"
         
         print(f"Configuring first arm: {arm1_port}")  
         print(f"Configuring second arm: {arm2_port}")

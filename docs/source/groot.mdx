@@ -110,7 +110,7 @@ Once you have trained your model using your parameters you can run inference in 
 ```bash
 lerobot-record \
   --robot.type=bi_so_follower \
-  --robot.left_arm_port=/dev/ttyACM1 \
+  --robot.left_arm_port=COM6 \
   --robot.right_arm_port=COM5 \
   --robot.id=bimanual_follower \
   --robot.cameras='{ right: {"type": "opencv", "index_or_path": 0, "width": 640, "height": 480, "fps": 30},

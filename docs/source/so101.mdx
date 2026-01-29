@@ -78,23 +78,23 @@ On Linux, you might need to give access to the USB ports by running:
 
 ```bash
 sudo chmod 666 COM5
-sudo chmod 666 /dev/ttyACM1
+sudo chmod 666 COM6
 ```
 
 Example output:
 
 ```
 Finding all available ports for the MotorBus.
-['COM5', '/dev/ttyACM1']
+['COM5', 'COM6']
 Remove the usb cable from your MotorsBus and press Enter when done.
 
 [...Disconnect corresponding leader or follower arm and press Enter...]
 
-The port of this MotorsBus is /dev/ttyACM1
+The port of this MotorsBus is COM6
 Reconnect the USB cable.
 ```
 
-Where the found port is: `/dev/ttyACM1` corresponding to your leader or follower arm.
+Where the found port is: `COM6` corresponding to your leader or follower arm.
 
 </hfoption>
 </hfoptions>
