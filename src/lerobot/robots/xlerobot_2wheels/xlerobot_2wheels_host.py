@@ -175,8 +175,8 @@ def main():
     
     parser = argparse.ArgumentParser(description="XLerobot2Wheels Host")
     parser.add_argument("--robot.id", type=str, default="xlerobot_2wheels", help="Robot ID")
-    parser.add_argument("--robot.port1", type=str, default="/dev/ttyACM0", help="Port 1")
-    parser.add_argument("--robot.port2", type=str, default="/dev/ttyACM1", help="Port 2")
+    parser.add_argument("--robot.port1", type=str, default="COM5", help="Port 1")
+    parser.add_argument("--robot.port2", type=str, default="COM6", help="Port 2")
     parser.add_argument("--host.port_zmq_cmd", type=int, default=5555, help="ZMQ command port")
     parser.add_argument("--host.port_zmq_observations", type=int, default=5556, help="ZMQ observation port")
     parser.add_argument("--host.connection_time_s", type=int, default=3600, help="Connection time limit")
