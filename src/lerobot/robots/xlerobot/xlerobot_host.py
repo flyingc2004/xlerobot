@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import base64
+import argparse
 import json
 import logging
 import time
@@ -48,15 +49,39 @@ class XLerobotHost:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="XLerobot ZMQ host (runs on the robot PC).")
+    parser.add_argument("--robot-id", default="my_xlerobot_pc", help="Robot id used in logs/metadata")
+    parser.add_argument("--port-zmq-cmd", type=int, default=5555, help="ZMQ PULL port for commands")
+    parser.add_argument(
+        "--port-zmq-observations", type=int, default=5556, help="ZMQ PUSH port for observations"
+    )
+    parser.add_argument(
+        "--connection-time-s", type=int, default=3600, help="How long to keep host alive (seconds)"
+    )
+    parser.add_argument(
+        "--watchdog-timeout-ms",
+        type=int,
+        default=500,
+        help="Stop base if no command received for this long",
+    )
+    parser.add_argument("--max-loop-freq-hz", type=int, default=30, help="Max host loop frequency")
+    args = parser.parse_args()
+
     logging.info("Configuring Xlerobot")
-    robot_config = XLerobotConfig(id="my_xlerobot_pc")
+    robot_config = XLerobotConfig(id=args.robot_id)
     robot = XLerobot(robot_config)
 
     logging.info("Connecting Xlerobot")
     robot.connect()
 
     logging.info("Starting HostAgent")
-    host_config = XLerobotHostConfig()
+    host_config = XLerobotHostConfig(
+        port_zmq_cmd=args.port_zmq_cmd,
+        port_zmq_observations=args.port_zmq_observations,
+        connection_time_s=args.connection_time_s,
+        watchdog_timeout_ms=args.watchdog_timeout_ms,
+        max_loop_freq_hz=args.max_loop_freq_hz,
+    )
     host = XLerobotHost(host_config)
 
     last_cmd_time = time.time()
@@ -96,7 +121,7 @@ def main():
                     ".jpg", last_observation[cam_key], [int(cv2.IMWRITE_JPEG_QUALITY), 90]
                 )
                 if ret:
-                    last_observation[cam_key] = base64.b64encode(buffer).decode("utf-8")
+                    last_observation[cam_key] = base64.b64encode(buffer.tobytes()).decode("utf-8")
                 else:
                     last_observation[cam_key] = ""
 

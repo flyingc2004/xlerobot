@@ -1,23 +1,46 @@
 # To Run on the host
-'''python
-PYTHONPATH=src python -m lerobot.robots.xlerobot.xlerobot_host --robot.id=my_xlerobot
-'''
+# '''powershell
+# cd C:\Users\32389\Desktop\lerobot\lerobot
+# $env:PYTHONPATH = "src"
+# python -m lerobot.robots.xlerobot.xlerobot_host --robot-id my_xlerobot_pc
+# '''
 
 # To Run the teleop:
-'''python
-PYTHONPATH=src python -m examples.xlerobot.teleoperate_Keyboard
-'''
+# '''powershell
+# cd C:\Users\32389\Desktop\lerobot\lerobot
+# $env:PYTHONPATH = "src"
+
+# Local (robot plugged into this PC):
+# python .\examples\xlerobot\4_xlerobot_teleop_keyboard.py --mode local
+
+# Remote (robot host on another PC):
+# python .\examples\xlerobot\4_xlerobot_teleop_keyboard.py --mode client --remote-ip 192.168.1.123
+
+# With dataset recording:
+# python .\examples\xlerobot\4_xlerobot_teleop_keyboard.py --mode client --remote-ip 192.168.1.123 --record --hf-repo-id myuser/my_dataset --task-description "Pick and place task"
+# '''
 
 import time
+import argparse
+import shutil
+import sys
+from pathlib import Path
+from typing import cast
 import numpy as np
 import math
 
 from lerobot.robots.xlerobot import XLerobotConfig, XLerobot
-# from lerobot.robots.xlerobot import XLerobotClient, XLerobotClientConfig
+from lerobot.robots.xlerobot.config_xlerobot import XLerobotClientConfig
+from lerobot.robots.xlerobot.xlerobot_client import XLerobotClient
 from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from lerobot.model.SO101Robot import SO101Kinematics
 from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
+
+# Add imports for dataset recording
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.utils import hw_to_dataset_features, build_dataset_frame
+from lerobot.utils.constants import ACTION, HF_LEROBOT_HOME, OBS_STR
 
 # Keymaps (semantic action: key)
 LEFT_KEYMAP = {
@@ -381,19 +404,51 @@ class SimpleTeleopArm:
     
 
 def main():
+    parser = argparse.ArgumentParser(description="XLerobot keyboard teleop (local or remote via ZMQ).")
+    parser.add_argument("--mode", choices=["local", "client"], default="local")
+    parser.add_argument(
+        "--remote-ip",
+        default="localhost",
+        help="Host IP when --mode client (e.g. 192.168.1.123).",
+    )
+    parser.add_argument("--port-zmq-cmd", type=int, default=5555)
+    parser.add_argument("--port-zmq-observations", type=int, default=5556)
+    parser.add_argument("--robot-id", default="my_xlerobot_pc")
+    parser.add_argument("--fps", type=int, default=50)
+    # Add recording options
+    parser.add_argument("--record", action="store_true", help="Enable dataset recording")
+    parser.add_argument("--hf-repo-id", default="<hf_username>/<dataset_repo_id>", help="HuggingFace repo ID for dataset")
+    parser.add_argument(
+        "--dataset-root",
+        default=None,
+        help=(
+            "Optional output directory for the dataset (full path). "
+            "If omitted, defaults to HF_LEROBOT_HOME/<hf-repo-id>."
+        ),
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="If the dataset directory already exists, delete it and recreate without prompting.",
+    )
+    parser.add_argument("--task-description", default="My task description", help="Task description for dataset")
+    parser.add_argument("--episode-time-sec", type=int, default=30, help="Time per episode in seconds")
+    args = parser.parse_args()
+
     # Teleop parameters
-    FPS = 50
-    # ip = "192.168.1.123"  # This is for zmq connection
-    ip = "localhost"  # This is for local/wired connection
-    robot_name = "my_xlerobot_pc"
+    FPS = args.fps
 
-    # For zmq connection
-    # robot_config = XLerobotClientConfig(remote_ip=ip, id=robot_name)
-    # robot = XLerobotClient(robot_config)    
-
-    # For local/wired connection
-    robot_config = XLerobotConfig()
-    robot = XLerobot(robot_config)
+    if args.mode == "client":
+        robot_config = XLerobotClientConfig(
+            remote_ip=args.remote_ip,
+            port_zmq_cmd=args.port_zmq_cmd,
+            port_zmq_observations=args.port_zmq_observations,
+            id=args.robot_id,
+        )
+        robot = XLerobotClient(robot_config)
+    else:
+        robot_config = XLerobotConfig(id=args.robot_id)
+        robot = XLerobot(robot_config)
     
     try:
         robot.connect()
@@ -422,6 +477,82 @@ def main():
     # Move both arms and head to zero position at start
     left_arm.move_to_zero_position(robot)
     right_arm.move_to_zero_position(robot)
+
+    # Initialize dataset recording if enabled
+    dataset = None
+    episode_start_time = 0.0
+    if args.record:
+        def _derive_default_dataset_root(repo_id: str) -> Path:
+            return HF_LEROBOT_HOME / repo_id
+
+        def _repo_id_with_suffix(repo_id: str, suffix: str) -> str:
+            parts = repo_id.split("/")
+            parts[-1] = f"{parts[-1]}{suffix}"
+            return "/".join(parts)
+
+        def _resolve_recording_location() -> tuple[str, Path, str | Path | None]:
+            """Return (repo_id, dataset_dir, root_arg_for_create)."""
+            if args.dataset_root:
+                dataset_dir = Path(args.dataset_root).expanduser()
+                repo_id = args.hf_repo_id
+                root_arg = dataset_dir
+            else:
+                repo_id = args.hf_repo_id
+                dataset_dir = _derive_default_dataset_root(repo_id)
+                root_arg = None
+
+            if not dataset_dir.exists():
+                return repo_id, dataset_dir, root_arg
+
+            if args.overwrite:
+                shutil.rmtree(dataset_dir)
+                return repo_id, dataset_dir, root_arg
+
+            if not sys.stdin.isatty():
+                raise FileExistsError(
+                    f"Dataset directory already exists: {dataset_dir}. "
+                    "Re-run with --overwrite, or pick a different --dataset-root / --hf-repo-id."
+                )
+
+            print(f"[RECORD] Dataset directory already exists: {dataset_dir}")
+            choice = input("[RECORD] Choose: (o)verwrite / (n)ew / (q)uit [n]: ").strip().lower() or "n"
+            if choice in {"o", "overwrite", "y", "yes"}:
+                shutil.rmtree(dataset_dir)
+                return repo_id, dataset_dir, root_arg
+            if choice in {"q", "quit"}:
+                raise SystemExit("[RECORD] Aborted by user.")
+
+            # New dataset
+            suffix = "_" + time.strftime("%Y%m%d_%H%M%S")
+            if args.dataset_root:
+                new_dataset_dir = dataset_dir.with_name(dataset_dir.name + suffix)
+                print(f"[RECORD] Using new dataset directory: {new_dataset_dir}")
+                return repo_id, new_dataset_dir, new_dataset_dir
+            else:
+                new_repo_id = _repo_id_with_suffix(repo_id, suffix)
+                new_dataset_dir = _derive_default_dataset_root(new_repo_id)
+                print(f"[RECORD] Using new repo_id: {new_repo_id}")
+                print(f"[RECORD] New dataset directory: {new_dataset_dir}")
+                return new_repo_id, new_dataset_dir, None
+
+        resolved_repo_id, resolved_dataset_dir, resolved_root_arg = _resolve_recording_location()
+
+        features = {}
+        features.update(hw_to_dataset_features(robot.observation_features, OBS_STR, use_video=True))
+        features.update(
+            hw_to_dataset_features(cast(dict[str, type | tuple], robot.action_features), ACTION, use_video=True)
+        )
+        dataset = LeRobotDataset.create(
+            repo_id=resolved_repo_id,
+            fps=FPS,
+            features=features,
+            root=resolved_root_arg,
+            use_videos=True,
+            robot_type=robot.robot_type,
+        )
+        print(f"[MAIN] Dataset recording enabled. Repo: {resolved_repo_id}")
+        print(f"[MAIN] Dataset directory: {dataset.root}")
+        episode_start_time = time.time()
 
     try:
         while True:
@@ -474,8 +605,29 @@ def main():
             obs = robot.get_observation()
             # print(f"[MAIN] Observation: {obs}")
             log_rerun_data(obs, action)
+
+            # Record data if enabled
+            if args.record and dataset is not None:
+                obs_frame = build_dataset_frame(dataset.features, obs, prefix=OBS_STR)
+                action_frame = build_dataset_frame(dataset.features, action, prefix=ACTION)
+                frame = {**obs_frame, **action_frame, "task": args.task_description}
+                dataset.add_frame(frame)
+
+                # Check if episode time exceeded
+                current_time = time.time()
+                if current_time - episode_start_time >= args.episode_time_sec:
+                    dataset.save_episode()
+                    print(f"[MAIN] Episode saved")
+                    episode_start_time = current_time
+
             # busy_wait(1.0 / FPS)
     finally:
+        # Save any remaining episode data
+        if args.record and dataset is not None and dataset.episode_buffer is not None:
+            if dataset.episode_buffer.get("size", 0) > 0:
+                dataset.save_episode()
+                print(f"[MAIN] Final episode saved")
+            dataset.finalize()
         robot.disconnect()
         keyboard.disconnect()
         print("Teleoperation ended.")
