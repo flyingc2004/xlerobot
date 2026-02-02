@@ -15,6 +15,14 @@
 import platform
 import time
 
+def busy_wait(seconds: float):
+    """Backward-compatible alias for timing waits.
+
+    Historically some examples/robots imported `busy_wait`. The implementation
+    now lives in `precise_sleep`, which provides a good trade-off between CPU
+    usage and timing accuracy.
+    """
+    precise_sleep(seconds)
 
 def precise_sleep(seconds: float, spin_threshold: float = 0.010, sleep_margin: float = 0.003):
     """
