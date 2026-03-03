@@ -48,9 +48,26 @@ HEAD_MOTOR_MAP = {
     "head_motor_2": "head_motor_2",
 }
 
+# Arm joint speed scales (P-control gain multipliers per joint)
+ARM_JOINT_SPEED_SCALE = {
+    "shoulder_pan": 0.55,
+    "shoulder_lift": 0.45,
+    "elbow_flex": 0.45,
+    "wrist_flex": 0.35,
+    "wrist_roll": 0.35,
+    "gripper": 0.8,
+}
+
+# Joy-Con input scales
+JOYCON_ARM_INPUT_SCALE = 0.45  # smaller => slower joystick control for arm pose
+
+# Base velocity boost
+BASE_VEL_SCALE = 2.8  # larger => faster base motion
+
 class FixedAxesJoyconRobotics(JoyconRobotics):
     def __init__(self, device, **kwargs):
         super().__init__(device, **kwargs)
+        self.joycon_arm_input_scale = JOYCON_ARM_INPUT_SCALE
         
         # Set different center values for left and right Joy-Cons
         if self.joycon.is_right():
@@ -69,7 +86,7 @@ class FixedAxesJoyconRobotics(JoyconRobotics):
     
     def common_update(self):
         # Modified update logic: joystick only controls fixed axes
-        speed_scale = 0.001
+        speed_scale = 0.001 * self.joycon_arm_input_scale
         
         # Get current orientation data to print pitch
         orientation_rad = self.get_orientation()
@@ -172,11 +189,12 @@ class FixedAxesJoyconRobotics(JoyconRobotics):
         return self.position, self.gripper_state, self.button_control
     
 class SimpleTeleopArm:
-    def __init__(self, joint_map, initial_obs, kinematics, prefix="right", kp=1):
+    def __init__(self, joint_map, initial_obs, kinematics, prefix="right", kp=1, joint_speed_scale=None):
         self.joint_map = joint_map
         self.prefix = prefix
         self.kp = kp
         self.kinematics = kinematics
+        self.joint_speed_scale = joint_speed_scale.copy() if joint_speed_scale else {}
         
         # Initial joint positions
         self.joint_positions = {
@@ -273,7 +291,7 @@ class SimpleTeleopArm:
         action = {}
         for j in self.target_positions:
             error = self.target_positions[j] - current[j]
-            control = self.kp * error
+            control = self.kp * error * self.joint_speed_scale.get(j, 1.0)
             action[f"{self.joint_map[j]}.pos"] = current[j] + control
         return action
 
@@ -359,8 +377,8 @@ def get_joycon_base_action(joycon, robot):
     return base_action
 
 # Base speed control parameters - adjustable slopes
-BASE_ACCELERATION_RATE = 2.0  # acceleration slope (speed/second)
-BASE_DECELERATION_RATE = 2.5  # deceleration slope (speed/second)
+BASE_ACCELERATION_RATE = 0.8  # acceleration slope (speed/second)
+BASE_DECELERATION_RATE = 1.0  # deceleration slope (speed/second)
 BASE_MAX_SPEED = 3.0          # maximum speed multiplier
 
 def get_joycon_speed_control(joycon):
@@ -456,8 +474,8 @@ def main():
     obs = robot.get_observation()
     kin_left = SO101Kinematics()
     kin_right = SO101Kinematics()
-    left_arm = SimpleTeleopArm(LEFT_JOINT_MAP, obs, kin_left, prefix="left")
-    right_arm = SimpleTeleopArm(RIGHT_JOINT_MAP, obs, kin_right, prefix="right")
+    left_arm = SimpleTeleopArm(LEFT_JOINT_MAP, obs, kin_left, prefix="left", joint_speed_scale=ARM_JOINT_SPEED_SCALE)
+    right_arm = SimpleTeleopArm(RIGHT_JOINT_MAP, obs, kin_right, prefix="right", joint_speed_scale=ARM_JOINT_SPEED_SCALE)
     head_control = SimpleHeadControl(obs)
 
     # Move both arms and head to zero position at start
@@ -496,7 +514,7 @@ def main():
             if base_action:
                 for key in base_action:
                     if 'vel' in key or 'velocity' in key:  
-                        base_action[key] *= speed_multiplier 
+                        base_action[key] *= speed_multiplier * BASE_VEL_SCALE 
 
             # Merge all actions
             action = {**left_action, **right_action, **head_action, **{}, **base_action}
